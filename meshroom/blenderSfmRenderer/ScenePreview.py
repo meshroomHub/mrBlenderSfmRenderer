@@ -81,7 +81,7 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
             group=None,
             enabled=lambda node: node.model.value.lower().endswith(".abc"),
             description="Settings for point cloud rendering.",
-            groupDesc=[
+            items=[
                 desc.FloatParam(
                     name="particleSize",
                     label="Particle Size",
@@ -104,7 +104,7 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
             group=None,
             enabled=lambda node: node.model.value.lower().endswith(".obj"),
             description="Setting for mesh rendering.",
-            groupDesc=[
+            items=[
                 desc.ChoiceParam(
                     name="shading",
                     label="Shading",
