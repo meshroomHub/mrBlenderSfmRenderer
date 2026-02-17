@@ -97,6 +97,7 @@ def setupCamera(intrinsic, pose):
     camObj = bpy.data.objects['Camera']
     camData = bpy.data.cameras['Camera']
 
+    bpy.context.scene.camera.data.clip_end = 10000.0
     bpy.context.scene.render.resolution_x = int(intrinsic['width'])
     bpy.context.scene.render.resolution_y = int(intrinsic['height'])
     bpy.context.scene.render.pixel_aspect_x = float(intrinsic['pixelRatio'])
@@ -104,7 +105,7 @@ def setupCamera(intrinsic, pose):
     camData.sensor_width = float(intrinsic['sensorWidth'])
     camData.lens = float(intrinsic['focalLength']) / float(intrinsic['pixelRatio'])
 
-    #shift is normalized with the largest resolution
+    # Shift is normalized with the largest resolution
     fwidth = float(intrinsic['width'])
     fheight = float(intrinsic['height'])
     maxSize = max(fwidth, fheight)
@@ -313,11 +314,26 @@ def setupPointCloudShading(obj, color, size):
     nodeEmission.inputs['Color'].default_value = color
     nodeOutputFill = material.node_tree.nodes['Material Output']
     material.node_tree.links.new(nodeEmission.outputs['Emission'], nodeOutputFill.inputs['Surface'])
+
     # Geometry nodes modifier for particles
     geo = bpy.data.node_groups.new('Particles_Graph', type='GeometryNodeTree')
     mod = obj.modifiers.new('Particles_Modifier', type='NODES')
     mod.node_group = geo
+
     # Setup nodes
+    nodeActiveCamera = geo.nodes.new(type='GeometryNodeInputActiveCamera')
+    nodeCameraObjectInfo = geo.nodes.new(type='GeometryNodeObjectInfo')
+    nodeObjectPosition = geo.nodes.new(type='GeometryNodeInputPosition')
+    nodeSubtract = geo.nodes.new(type='ShaderNodeVectorMath')
+    nodeNormalize = geo.nodes.new(type='ShaderNodeVectorMath')
+    nodeAdd = geo.nodes.new(type='ShaderNodeVectorMath')
+    nodeSetPosition = geo.nodes.new(type='GeometryNodeSetPosition')
+
+    nodeSubtract.operation = 'SUBTRACT'
+    nodeNormalize.operation = 'NORMALIZE'
+    nodeAdd.operation = 'ADD'
+    nodeCameraObjectInfo.transform_space = 'RELATIVE'
+
     nodeInput = geo.nodes.new(type='NodeGroupInput')
     nodeOutput = geo.nodes.new(type='NodeGroupOutput')
     nodeIoP = geo.nodes.new(type='GeometryNodeInstanceOnPoints')
@@ -334,9 +350,19 @@ def setupPointCloudShading(obj, color, size):
     else:
         geo.inputs.new('NodeSocketGeometry', 'Geometry')
         geo.outputs.new('NodeSocketGeometry', 'Geometry')
-        
+
     # Connect nodes
-    geo.links.new(nodeInput.outputs['Geometry'], nodeIoP.inputs['Points'])
+    geo.links.new(nodeActiveCamera.outputs['Active Camera'], nodeCameraObjectInfo.inputs['Object'])
+    geo.links.new(nodeObjectPosition.outputs['Position'], nodeSubtract.inputs[0])
+    geo.links.new(nodeCameraObjectInfo.outputs['Location'], nodeSubtract.inputs[1])
+    geo.links.new(nodeSubtract.outputs['Vector'], nodeNormalize.inputs['Vector'])
+    geo.links.new(nodeNormalize.outputs['Vector'], nodeAdd.inputs[0])
+    geo.links.new(nodeCameraObjectInfo.outputs['Location'], nodeAdd.inputs[1])
+    geo.links.new(nodeCameraObjectInfo.outputs['Location'], nodeAdd.inputs[1])
+    geo.links.new(nodeInput.outputs['Geometry'], nodeSetPosition.inputs['Geometry'])
+    geo.links.new(nodeAdd.outputs['Vector'], nodeSetPosition.inputs['Position'])
+
+    geo.links.new(nodeSetPosition.outputs['Geometry'], nodeIoP.inputs['Points'])
     geo.links.new(nodeCube.outputs['Mesh'], nodeIoP.inputs['Instance'])
     geo.links.new(nodeSize.outputs['Value'], nodeIoP.inputs['Scale'])
     geo.links.new(nodeIoP.outputs['Instances'], nodeMat.inputs['Geometry'])
