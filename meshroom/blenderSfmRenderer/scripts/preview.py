@@ -47,8 +47,8 @@ def createParser():
         help="Apply mask to the rendered geometry or not.",
     )
     parser.add_argument(
-        "--masks", metavar='FILE', required=False,
-        help="Path to folder containing masks to apply on rendered geometry.",
+        "--masks", metavar='FILE', required=False, nargs='?', const=None,
+        help="Path to folder containing masks to apply on rendered geometry. If omitted when useMasks is true, will use background image alpha channel.",
     )
     parser.add_argument(
         "--particleSize", type=float, required=False,
@@ -148,8 +148,14 @@ def initScene():
     bpy.context.scene.cycles.use_denoising = False
 
 
-def initCompositing(useBackground, useMasks):
-    '''Initialize Blender compositing graph for adding background image to render.'''
+def initCompositing(useBackground, useMasks, useBackgroundAlpha=False):
+    '''Initialize Blender compositing graph for adding background image to render.
+    
+    Args:
+        useBackground: Whether to use background images
+        useMasks: Whether to apply masking to rendered geometry
+        useBackgroundAlpha: If True and useMasks is True, use background image's alpha channel instead of external mask
+    '''
     bpy.context.scene.render.film_transparent = True
     bpy.context.scene.use_nodes = True
     nodeAlphaOver = bpy.context.scene.node_tree.nodes.new(type="CompositorNodeAlphaOver")
@@ -161,7 +167,11 @@ def initCompositing(useBackground, useMasks):
     if useBackground and useMasks:
         bpy.context.scene.node_tree.links.new(nodeBackground.outputs['Image'], nodeAlphaOver.inputs[1])
         bpy.context.scene.node_tree.links.new(nodeRender.outputs['Image'], nodeSetAlpha.inputs['Image'])
-        bpy.context.scene.node_tree.links.new(nodeMask.outputs['Image'], nodeSetAlpha.inputs['Alpha'])
+        # Use background alpha or external mask depending on useBackgroundAlpha flag
+        if useBackgroundAlpha:
+            bpy.context.scene.node_tree.links.new(nodeBackground.outputs['Alpha'], nodeSetAlpha.inputs['Alpha'])
+        else:
+            bpy.context.scene.node_tree.links.new(nodeMask.outputs['Image'], nodeSetAlpha.inputs['Alpha'])
         bpy.context.scene.node_tree.links.new(nodeSetAlpha.outputs['Image'], nodeAlphaOver.inputs[2])
         bpy.context.scene.node_tree.links.new(nodeAlphaOver.outputs['Image'], nodeComposite.inputs['Image'])
     elif useBackground:
@@ -170,7 +180,12 @@ def initCompositing(useBackground, useMasks):
         bpy.context.scene.node_tree.links.new(nodeAlphaOver.outputs['Image'], nodeComposite.inputs['Image'])
     elif useMasks:
         bpy.context.scene.node_tree.links.new(nodeRender.outputs['Image'], nodeSetAlpha.inputs['Image'])
-        bpy.context.scene.node_tree.links.new(nodeMask.outputs['Image'], nodeSetAlpha.inputs['Alpha'])
+        if useBackgroundAlpha:
+            # This case shouldn't happen (useMasks without useBackground but asking for background alpha)
+            # Fall back to render alpha
+            bpy.context.scene.node_tree.links.new(nodeRender.outputs['Alpha'], nodeSetAlpha.inputs['Alpha'])
+        else:
+            bpy.context.scene.node_tree.links.new(nodeMask.outputs['Image'], nodeSetAlpha.inputs['Alpha'])
         bpy.context.scene.node_tree.links.new(nodeSetAlpha.outputs['Image'], nodeComposite.inputs['Image'])
     return nodeBackground, nodeMask
 
@@ -390,6 +405,12 @@ def main():
         parser.print_help()
         return -1
 
+    # Determine if we should use background alpha instead of external masks
+    # If useMasks is True but no masks folder provided, fall back to using background image alpha
+    useBackgroundAlpha = args.useMasks and not args.masks
+    if useBackgroundAlpha:
+        print("No masks folder provided - will use background image alpha channel for masking")
+
     # Color palette (common for point cloud and mesh visualization)
     palette={
         'Grey':(0.2, 0.2, 0.2, 1),
@@ -403,7 +424,7 @@ def main():
     initScene()
 
     print("Init compositing")
-    nodeBackground, nodeMask = initCompositing(args.useBackground, args.useMasks)
+    nodeBackground, nodeMask = initCompositing(args.useBackground, args.useMasks, useBackgroundAlpha)
 
     print("Parse cameras SfM file")
     views, intrinsics, poses = parseSfMCameraFile(args.cameras)
@@ -456,7 +477,8 @@ def main():
                 continue
         
         mask = None
-        if args.useMasks:
+        # Only load external masks if not using background alpha
+        if args.useMasks and not useBackgroundAlpha:
             mask = setupMask(view, args.masks, nodeMask)
             if not mask:
                 # mask setup failed
