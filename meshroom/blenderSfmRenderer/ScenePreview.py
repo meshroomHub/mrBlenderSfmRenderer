@@ -1,13 +1,15 @@
 __version__ = "2.0"
 
 from meshroom.core import desc
+from pyalicevision import parallelization as avpar
+
 import os.path
 
 currentDir = os.path.dirname(os.path.abspath(__file__))
 
 class ScenePreview(desc.CommandLineNode):
     commandLine = "{blenderCmdValue} -b --python {scriptValue} -- {allParams}"
-    size = desc.DynamicNodeSize("cameras")
+    size = avpar.DynamicViewsSize("cameras")
     parallelization = desc.Parallelization(blockSize=40)
     commandLineRange = "--rangeStart {rangeStart} --rangeSize {rangeBlockSize}"
 
