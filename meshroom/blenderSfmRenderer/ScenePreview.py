@@ -28,7 +28,7 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
             description="Command to launch Blender.",
             value="blender",
             invalidate=False,
-            group="",
+            commandLineGroup="",
         ),
         desc.File(
             name="script",
@@ -36,7 +36,7 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
             description="Path to the internal script for rendering in Blender.",
             value=os.path.join("{nodeSourceCodeFolder}", "scripts", "preview.py"),
             invalidate=False,
-            group="",
+            commandLineGroup="",
             advanced=True,
         ),
         desc.File(
@@ -80,7 +80,7 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
         desc.GroupAttribute(
             name="pointCloudParams",
             label="Point Cloud Settings",
-            group=None,
+            commandLineGroup=None,
             enabled=lambda node: node.model.value.lower().endswith(".abc"),
             description="Settings for point cloud rendering.",
             items=[
@@ -103,7 +103,7 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
         desc.GroupAttribute(
             name="meshParams",
             label="Mesh Settings",
-            group=None,
+            commandLineGroup=None,
             enabled=lambda node: node.model.value.lower().endswith(".obj"),
             description="Setting for mesh rendering.",
             items=[
@@ -138,6 +138,6 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
             description="Frames rendered in Blender.",
             semantic="image",
             value="{nodeCacheFolder}/<FILESTEM>_preview.jpg",
-            group="",
+            commandLineGroup="",
         ),
     ]
