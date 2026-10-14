@@ -307,6 +307,8 @@ def main():
     if useMesh:
         print("Load mesh " + args.model)
         obj = importSelected(bpy.ops.wm.obj_import, args.model)
+        # AliceVision meshes are saved as (x, -y, -z): bring them back to the sfmData world
+        obj.matrix_world = mathutils.Matrix.Diagonal((1.0, -1.0, -1.0, 1.0))
         if args.shading == 'line_art':
             setupLineArtShading(obj.data, PALETTE[args.edgeColor])
         else:

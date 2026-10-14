@@ -90,9 +90,9 @@ Outputs: unchanged from 2.0 — `output` = `{nodeCacheFolder}`, `frames` = `{nod
 
 Same scene setup as 2.0 (Cycles, 1 sample, no denoise, film transparent, compositing graph for background/mask).
 
-- **Mesh**: `bpy.ops.wm.obj_import(filepath, forward_axis='Y', up_axis='Z')` — keeps AliceVision world coordinates unchanged. Wireframe or line-art shading as in 2.0.
+- **Mesh**: `bpy.ops.wm.obj_import(filepath, forward_axis='Y', up_axis='Z')` (file coordinates unchanged), then the y/z flip below. Wireframe or line-art shading as in 2.0.
 - **Landmarks**: `bpy.ops.wm.ply_import(..., forward_axis='Y', up_axis='Z')`, then the 2.0 geometry-nodes particle setup.
-- **World convention**: everything stays in AliceVision world coordinates; only the camera's local axes are converted.
+- **World convention**: the scene is in sfmData world coordinates. Landmarks are exported from the sfmData unchanged. AliceVision meshes are saved with y and z negated (`Mesh::save`, `src/aliceVision/mesh/Mesh.cpp`), so the imported mesh object gets `matrix_world = diag(1, −1, −1, 1)`.
 - Range: slice `views[rangeStart : rangeStart + rangeSize]`, clamped to the list length (as 2.0); skip entries with `valid: false`.
 - Per view: apply `cameraMath` output, set background/mask image (same viewId/stem glob lookup as 2.0; skip the view if a required image is missing), render to `<output>/<imageStem>_preview.jpg`, free images. No rescale (see Camera math).
 
