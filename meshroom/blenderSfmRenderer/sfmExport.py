@@ -22,6 +22,7 @@ def viewEntry(sfm, view):
     entry = {
         "viewId": str(view.getViewId()),
         "imageStem": os.path.splitext(os.path.basename(imagePath))[0],
+        "imagePath": imagePath,
         "valid": False,
     }
     if not sfm.isPoseAndIntrinsicDefined(view):

@@ -23,9 +23,9 @@ class ScenePreview(desc.CommandLineNode):
     documentation = """
 This node uses Blender to render a 3D model from every view of an SfMData.
 Each render matches the view's pinhole intrinsics (focal, principal point, pixel ratio) and its pose;
-lens distortion is ignored, so renders align with the undistorted images.
+The SfMData views are expected to be undistorted: lens distortion is ignored.
 If a mesh (.obj) is given it is rendered, otherwise the SfMData landmarks are rendered as a point cloud.
-The undistorted views can optionally be used as background.
+Each render is composited over its view image.
 """
 
     inputs = [
@@ -49,19 +49,6 @@ The undistorted views can optionally be used as background.
             label="Mesh",
             description="Optional mesh (.obj) to render. If empty, the SfMData landmarks are rendered.",
             value="",
-        ),
-        desc.BoolParam(
-            name="useBackground",
-            label="Display Background",
-            description="Use the undistorted images as background.",
-            value=True,
-        ),
-        desc.File(
-            name="undistortedImages",
-            label="Undistorted Images",
-            description="Folder containing the undistorted images.",
-            value="",
-            enabled=lambda node: node.useBackground.value,
         ),
         desc.BoolParam(
             name="useMasks",
@@ -143,9 +130,6 @@ The undistorted views can optionally be used as background.
 
     def preprocess(self, node):
         '''Export cameras (and landmarks when no mesh is given) once, before the Blender chunks.'''
-        if node.useBackground.value and not node.undistortedImages.value:
-            raise RuntimeError("'Display Background' is enabled but 'Undistorted Images' is empty.")
-
         model = node.model.value
         useMesh = model.lower().endswith(".obj")
         if model and not useMesh:

@@ -18,12 +18,10 @@ def nodeModule():
         sys.path.remove(str(NODE_DIR.parent))
 
 
-def fakeNode(tmp_path, cameras, model="", useBackground=False, undistortedImages=""):
+def fakeNode(tmp_path, cameras, model=""):
     return types.SimpleNamespace(
         cameras=types.SimpleNamespace(value=str(cameras)),
         model=types.SimpleNamespace(value=model),
-        useBackground=types.SimpleNamespace(value=useBackground),
-        undistortedImages=types.SimpleNamespace(value=undistortedImages),
         internalFolder=str(tmp_path),
     )
 
@@ -36,6 +34,9 @@ def test_nodeDescription(nodeModule):
     assert '--views "{nodeCacheFolder}/cameras.json"' in nodeDesc.commandLine
     inputs = {a.name: a for a in nodeDesc.inputs}
     assert "script" not in inputs
+    # The background is always the view image from the sfmData
+    assert "useBackground" not in inputs
+    assert "undistortedImages" not in inputs
     assert inputs["cameras"].commandLineGroup == ""
     outputs = {a.name: a for a in nodeDesc.outputs}
     assert outputs["frames"].semantic == "image"
@@ -68,11 +69,3 @@ def test_commandLineQuotesPaths(nodeModule):
     assert '--python "{nodeSourceCodeFolder}/scripts/render.py"' in cmd
     assert '--views "{nodeCacheFolder}/cameras.json"' in cmd
     assert '--landmarks "{nodeCacheFolder}/landmarks.ply"' in cmd
-
-
-def test_preprocessBackgroundWithoutFolderRaises(tmp_path, nodeModule):
-    '''Default parameters (background on, no folder) must fail once in preprocess, not in every chunk.'''
-    sfmPath = makeSfm(tmp_path / "in.sfm")
-    with pytest.raises(RuntimeError, match="Undistorted Images"):
-        nodeModule.ScenePreview().preprocess(fakeNode(tmp_path, sfmPath, useBackground=True))
-    assert not (tmp_path / "cameras.json").exists()

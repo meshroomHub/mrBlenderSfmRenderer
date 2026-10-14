@@ -59,11 +59,12 @@ def test_exportCameras(tmp_path):
     views = json.loads((tmp_path / "cameras.json").read_text())["views"]
     # Sorted by viewId, invalid views kept so chunk ranges stay aligned
     assert [v["viewId"] for v in views] == ["5", "10"]
-    assert views[0] == {"viewId": "5", "imageStem": "IMG_0005", "valid": False}
+    assert views[0] == {"viewId": "5", "imageStem": "IMG_0005", "imagePath": "/data/IMG_0005.jpg", "valid": False}
 
     v = views[1]
     assert v["valid"] is True
     assert v["imageStem"] == "IMG_0010"
+    assert v["imagePath"] == "/data/IMG_0010.jpg"
     assert (v["width"], v["height"]) == (1000, 800)
     assert [v["fx"], v["fy"], v["ox"], v["oy"]] == pytest.approx([900.0, 700.0, 5.0, -3.0])
     assert np.allclose(v["R"], R)
