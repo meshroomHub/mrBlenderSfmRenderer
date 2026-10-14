@@ -109,3 +109,58 @@ def test_renderBackgroundColorPreserved(tmp_path, blenderCmd):
     runBlender(blenderCmd, SCRIPTS_DIR / "render.py", args + ["--undistortedImages", background])
     corner = readPixels(out / "imgA_preview.jpg")[5, 5]
     assert np.abs(corner - [0, 0, 200]).max() <= 8, corner
+
+
+def writeUprightScene(folder):
+    '''One camera at AliceVision world (0, 0, -5) looking +z, identity rotation.
+
+    Geometry is placed around world (0, -1, 0): AliceVision y points down in the image,
+    so it must appear in the upper half of the render.
+    '''
+    view = {"viewId": "1", "imageStem": "up", "valid": True, "width": 200, "height": 200,
+            "fx": 300.0, "fy": 300.0, "ox": 0.0, "oy": 0.0, "R": IDENTITY, "C": [0.0, 0.0, -5.0]}
+    (folder / "cameras.json").write_text(json.dumps({"views": [view]}))
+
+
+def brightRows(path):
+    '''Row indices containing at least one bright pixel.'''
+    pixels = readPixels(path)
+    return np.nonzero(pixels.max(axis=(1, 2)) > 60)[0]
+
+
+def test_meshInAliceVisionConventionRendersUpright(tmp_path, blenderCmd):
+    '''AliceVision Mesh::save writes vertices as (x, -y, -z): the render must undo it.'''
+    writeUprightScene(tmp_path)
+    # Triangle around world (0, -1, 0), written like AliceVision does (y and z negated), both windings
+    triangle = [(-0.3, -1.2, 0.0), (0.3, -1.2, 0.0), (0.0, -0.8, 0.0)]
+    lines = ["v %f %f %f" % (x, -y, -z) for x, y, z in triangle] + ["f 1 2 3", "f 1 3 2"]
+    (tmp_path / "mesh.obj").write_text("\n".join(lines) + "\n")
+    out = tmp_path / "out"
+    out.mkdir()
+    runBlender(blenderCmd, SCRIPTS_DIR / "render.py",
+               ["--views", tmp_path / "cameras.json", "--model", tmp_path / "mesh.obj", "--output", out,
+                "--useBackground", "False", "--useMasks", "False", "--shading", "wireframe", "--edgeColor", "Green"])
+    rows = brightRows(out / "up_preview.jpg")
+    assert len(rows) > 0, "mesh not visible"
+    assert rows.max() < 100, f"mesh drawn in lower half (rows {rows.min()}..{rows.max()})"
+
+
+def test_landmarksRenderUpright(tmp_path, blenderCmd):
+    '''Landmarks come from the sfmData world unchanged.'''
+    writeUprightScene(tmp_path)
+    points = np.zeros(5, dtype=PLY_DTYPE)
+    points[:] = [(dx, -1.0 + dy, 0.0, 255, 0, 0) for dx, dy in [(0, 0), (0.1, 0), (-0.1, 0), (0, 0.1), (0, -0.1)]]
+    with open(tmp_path / "landmarks.ply", "wb") as f:
+        f.write(("ply\nformat binary_little_endian 1.0\nelement vertex 5\n"
+                 "property float x\nproperty float y\nproperty float z\n"
+                 "property uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n").encode("ascii"))
+        points.tofile(f)
+    out = tmp_path / "out"
+    out.mkdir()
+    runBlender(blenderCmd, SCRIPTS_DIR / "render.py",
+               ["--views", tmp_path / "cameras.json", "--landmarks", tmp_path / "landmarks.ply", "--model", "",
+                "--output", out, "--useBackground", "False", "--useMasks", "False",
+                "--particleSize", "0.02", "--particleColor", "White"])
+    rows = brightRows(out / "up_preview.jpg")
+    assert len(rows) > 0, "landmarks not visible"
+    assert rows.max() < 100, f"landmarks drawn in lower half (rows {rows.min()}..{rows.max()})"
