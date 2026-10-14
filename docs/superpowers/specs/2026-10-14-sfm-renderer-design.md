@@ -94,7 +94,7 @@ Same scene setup as 2.0 (Cycles, 1 sample, no denoise, film transparent, composi
 - **Landmarks**: `bpy.ops.wm.ply_import(..., forward_axis='Y', up_axis='Z')`, then the 2.0 geometry-nodes particle setup.
 - **World convention**: everything stays in AliceVision world coordinates; only the camera's local axes are converted.
 - Range: slice `views[rangeStart : rangeStart + rangeSize]`, clamped to the list length (as 2.0); skip entries with `valid: false`.
-- Per view: apply `cameraMath` output, set background/mask image (same viewId/stem glob lookup as 2.0; skip the view if a required image is missing), render to `<output>/<imageStem>_preview.jpg`, rescale if pixel ratio ≠ 1 (as 2.0), free images.
+- Per view: apply `cameraMath` output, set background/mask image (same viewId/stem glob lookup as 2.0; skip the view if a required image is missing), render to `<output>/<imageStem>_preview.jpg`, free images. No rescale (see Camera math).
 
 ## Camera math (`cameraMath.py`)
 
@@ -102,10 +102,11 @@ AliceVision camera frame: x right, y down, z forward. Blender camera frame: x ri
 
 - `matrix_world = [[Rᵀ, C], [0, 1]] · diag(1, −1, −1, 1)`
 - `sensor_fit = 'HORIZONTAL'`, `sensor_width = width` (pixel units), `lens = fx`
-- `resolution = (width, height)`; pixel ratio `fy / fx` handled with `pixel_aspect_x` + post-rescale as in 2.0
-- `shift_x = −ox / max(width, height)`, `shift_y = oy / max(width, height)` (Blender normalizes shift by the larger dimension; signs as in 2.0)
+- `resolution = (width, height)`, `resolution_percentage = 100`
+- Non-square pixels: `r = fy / fx`; `pixel_aspect = (r, 1)` if `r ≥ 1`, else `(1, 1/r)` (Blender clamps aspect to ≥ 1). The rendered image stays `width × height` with the right fx and fy, so there is **no post-render rescale** (2.0's rescale broke alignment with the undistorted images).
+- `shift_x = −ox / width`, `shift_y = oy · fx / (fy · width)`
 
-Correctness is defined by the projection test below, not by the formulas: if a sign is wrong the test fails and the formula is fixed.
+Verified on 2026-10-14 in Blender 4.5.3 with `bpy_extras.object_utils.world_to_camera_view`: landscape and portrait, `fy/fx` above and below 1, off-center principal point, rotated pose. Maximum error was 1.7e-4 px (float32).
 
 ## Error handling
 
@@ -118,8 +119,13 @@ Correctness is defined by the projection test below, not by the formulas: if a s
 
 ## Testing
 
-1. **`tests/test_cameraMath.py`** (plain pytest, no Blender, no pyalicevision): build a synthetic pinhole camera (non-centered principal point, non-square pixels, rotated pose), project 3D points two ways — (a) AliceVision pinhole model `x = fx·(R(X−C))ₓ/z + w/2 + ox`, (b) Blender's model reconstructed from the `cameraMath` output (inverse `matrix_world`, perspective with lens/sensor/shift) — and assert equal pixels to 1e-6.
-2. **Smoke render**: a rez command, run manually, that renders a small known dataset through the node in Meshroom; check that rendered landmarks overlay their features on the undistorted background images and that the mesh silhouette matches.
+Tests run in `rez env aliceVision python-3.11 pytest`; Blender is reached through the `BLENDER_CMD` environment variable (e.g. `rez env blender-4 -- blender`). Blender tests are skipped when it is unset.
+
+1. **`tests/test_cameraMath.py`** (pure Python): checks the parameter formulas, camera center, and optical axis.
+2. **`tests/test_sfmExport.py`** (pyalicevision): builds a synthetic `.sfm`, runs the export, and checks `cameras.json` (values, `valid: false` entries, sort order) and `landmarks.ply`.
+3. **`tests/test_blenderProjection.py`** (Blender): applies `render.setupCamera` in Blender, projects points with `world_to_camera_view`, and compares them with the AliceVision pinhole projection (tolerance 1e-2 px).
+4. **`tests/test_blenderRender.py`** (Blender): runs `render.py` end to end on a synthetic `cameras.json` + PLY, and checks one output image per valid view at `width × height`.
+5. **Smoke run** in Meshroom on a real dataset, checked by eye: landmarks overlay their features on the undistorted backgrounds, and the mesh silhouette matches.
 
 ## Out of scope
 
