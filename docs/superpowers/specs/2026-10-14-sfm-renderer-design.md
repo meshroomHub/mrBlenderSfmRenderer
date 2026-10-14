@@ -19,22 +19,24 @@ Rendering style stays the old preview style, chosen by node parameters: mesh as 
 
 ## Architecture
 
-Two stages per chunk:
+`ScenePreview` stays a `desc.CommandLineNode`, like 2.0. The AliceVision work moves into the node's `preprocess`, which Meshroom runs once, as its own chunk (`preprocess.log`), before the parallel chunks:
 
 ```
-Meshroom process (pyalicevision)            Blender subprocess (bpy only)
-ScenePreview.processChunk                   scripts/render.py
-  load sfmData                                read chunk JSON
-  select views of the chunk range    ──►      build scene, import mesh / landmarks PLY
-  write chunk_<i>.json (+ landmarks.ply)      for each view: set camera, compositing, render
-  run blender -b --python render.py -- json   exit code != 0 on fatal error
+preprocess(node)  — once, Meshroom compute process (pyalicevision)
+  load sfmData → {nodeCacheFolder}/cameras.json  (+ landmarks.ply when no mesh)
+
+chunk i  — parallel, plugin rez env (blender-4), command line
+  blender -b --python render.py -- --views cameras.json [--landmarks landmarks.ply]
+                                    {allParams} --rangeStart s --rangeSize n
 ```
+
+For a `CommandLineNode`, `NodeChunk.process` calls `nodeDesc.preprocess(node)` in the current process (`meshroom/core/node.py`, `NodeChunk.process`). The node module already imports `pyalicevision` at module level, so pyalicevision is available there. Blender only runs in the chunk command line. The sfmData is loaded once, files are written once (no races between chunks), and there is no custom subprocess code.
 
 ### Files
 
 | File | Role |
 |---|---|
-| `meshroom/blenderSfmRenderer/ScenePreview.py` | Node description + `processChunk`. Imports pyalicevision. |
+| `meshroom/blenderSfmRenderer/ScenePreview.py` | Node description, `commandLine`, and `preprocess` (pyalicevision export). |
 | `meshroom/blenderSfmRenderer/scripts/render.py` | Blender script. Imports `bpy` and `cameraMath` only. Replaces `preview.py`. |
 | `meshroom/blenderSfmRenderer/scripts/cameraMath.py` | Pure Python (no `bpy`, no pyalicevision): converts a pinhole camera to Blender camera parameters and `matrix_world` as nested lists. Unit-testable anywhere. |
 | `meshroom/blenderSfmRenderer/__init__.py`, `scripts/__init__.py` | Restored from HEAD (currently deleted in the working tree). |
@@ -44,52 +46,55 @@ ScenePreview.processChunk                   scripts/render.py
 
 ## Node interface
 
+```python
+commandLine = ("{blenderCmdValue} -b --python {nodeSourceCodeFolder}/scripts/render.py -- "
+               "--views {nodeCacheFolder}/cameras.json --landmarks {nodeCacheFolder}/landmarks.ply {allParams}")
+commandLineRange = "--rangeStart {rangeStart} --rangeSize {rangeBlockSize}"
+size = avpar.DynamicViewsSize("cameras")
+parallelization = desc.Parallelization(blockSize=40)
+```
+
+`render.py` uses `--landmarks` only when no `.obj` mesh is given.
+
 Inputs (names kept from 2.0 where meaning is unchanged):
 
 | Name | Type | Notes |
 |---|---|---|
-| `blenderCmd` | File | Default `blender`, `invalidate=False`. |
-| `cameras` | File | sfmData, any pyalicevision-readable format. |
+| `blenderCmd` | File | Default `blender`, `invalidate=False`, `commandLineGroup=""` (not in `allParams`). |
+| `cameras` | File | sfmData, any pyalicevision-readable format. `commandLineGroup=""`: Blender reads `cameras.json`, not the sfmData. |
 | `model` | File | Optional `.obj` mesh. Empty → render sfmData landmarks. A `.abc` value (from 2.0 graphs) logs a warning and falls back to landmarks. |
 | `useBackground`, `undistortedImages` | Bool, File | Unchanged. |
 | `useMasks`, `masks` | Bool, File | Unchanged (empty `masks` → background alpha, as in 2.0). |
-| `pointCloudParams` (`particleSize`, `particleColor`) | Group | Enabled when `model` is empty or not `.obj`. |
+| `pointCloudParams` (`particleSize`, `particleColor`) | Group | Enabled when `model` does not end with `.obj`. |
 | `meshParams` (`shading`, `edgeColor`) | Group | Enabled when `model` ends with `.obj`. |
 
-The `script` input is removed (the node knows its script path).
+The `script` input is removed (the command line uses `{nodeSourceCodeFolder}`).
 
 Outputs: unchanged from 2.0 — `output` = `{nodeCacheFolder}`, `frames` = `{nodeCacheFolder}/<FILESTEM>_preview.jpg` with `semantic="image"`.
 
-Parallelization: unchanged — `size = avpar.DynamicViewsSize("cameras")`, `Parallelization(blockSize=40)`.
+## Stage 1 — `preprocess` (pyalicevision, once)
 
-## Stage 1 — `processChunk` (pyalicevision)
-
-1. `sfmDataIO.load` the `cameras` file (views, intrinsics, extrinsics, plus structure only if landmarks are needed).
-2. Take views sorted by `viewId`, slice `[chunk.range.start : chunk.range.end]`.
-3. Keep views where `sfm.isPoseAndIntrinsicDefined(view)`; log skipped ones.
-4. For each kept view, read from the `IntrinsicScaleOffset`: width, height, scale `(fx, fy)` in pixels, offset `(ox, oy)` = principal point minus image center, in pixels; from the pose: rotation `R` (world→camera) and center `C`.
-5. Write `{nodeCacheFolder}/chunk_<i>.json`:
+1. `sfmDataIO.load` the `cameras` file: views, intrinsics, extrinsics, plus structure only when landmarks are needed.
+2. Iterate views sorted by `viewId`. This is the order the chunk ranges index into.
+3. For each view, write an entry. Views without a pose or intrinsic, or with a non-pinhole intrinsic, get `"valid": false` and are logged. They are kept in the list so chunk ranges stay aligned with `DynamicViewsSize`.
+4. A valid entry holds, from the `IntrinsicScaleOffset`: width, height, scale `(fx, fy)` in pixels, and offset `(ox, oy)` = principal point minus image center, in pixels. From the pose it holds rotation `R` (world→camera) and center `C`.
+5. Write `{nodeCacheFolder}/cameras.json`:
    ```json
-   {
-     "settings": { "model": "...", "useBackground": true, "undistortedImages": "...",
-                   "useMasks": false, "masks": "", "particleSize": 0.01, "particleColor": "Red",
-                   "shading": "wireframe", "edgeColor": "Red", "landmarks": "<ply path or null>" },
-     "views": [ { "viewId": "123", "outputPath": ".../<stem>_preview.jpg",
+   { "views": [ { "viewId": "123", "valid": true, "imageStem": "IMG_0001",
                   "width": 4000, "height": 3000, "fx": 3200.0, "fy": 3200.0,
-                  "ox": 12.3, "oy": -4.5, "R": [[...],[...],[...]], "C": [x, y, z] } ]
-   }
+                  "ox": 12.3, "oy": -4.5, "R": [[...],[...],[...]], "C": [x, y, z] } ] }
    ```
-6. Landmark mode: write `{nodeCacheFolder}/landmarks_<i>.ply` (ASCII or binary little-endian, `x y z` float + `red green blue` uchar). Per-chunk file name avoids races between parallel chunks.
-7. `subprocess.run([blenderCmd, "-b", "--python", render.py, "--", jsonPath])`, stream output to the chunk log; raise if the return code is non-zero.
+6. If `model` does not end with `.obj`, write `{nodeCacheFolder}/landmarks.ply` (binary little-endian, `x y z` float + `red green blue` uchar). Raise if the sfmData has no landmarks.
 
-## Stage 2 — `render.py` (bpy)
+## Stage 2 — `render.py` (bpy, per chunk)
 
 Same scene setup as 2.0 (Cycles, 1 sample, no denoise, film transparent, compositing graph for background/mask).
 
 - **Mesh**: `bpy.ops.wm.obj_import(filepath, forward_axis='Y', up_axis='Z')` — keeps AliceVision world coordinates unchanged. Wireframe or line-art shading as in 2.0.
 - **Landmarks**: `bpy.ops.wm.ply_import(..., forward_axis='Y', up_axis='Z')`, then the 2.0 geometry-nodes particle setup.
 - **World convention**: everything stays in AliceVision world coordinates; only the camera's local axes are converted.
-- Per view: apply `cameraMath` output, set background/mask image (same viewId/stem glob lookup as 2.0; skip the view if a required image is missing), render to `outputPath`, rescale if pixel ratio ≠ 1 (as 2.0), free images.
+- Range: slice `views[rangeStart : rangeStart + rangeSize]`, clamped to the list length (as 2.0); skip entries with `valid: false`.
+- Per view: apply `cameraMath` output, set background/mask image (same viewId/stem glob lookup as 2.0; skip the view if a required image is missing), render to `<output>/<imageStem>_preview.jpg`, rescale if pixel ratio ≠ 1 (as 2.0), free images.
 
 ## Camera math (`cameraMath.py`)
 
@@ -104,12 +109,12 @@ Correctness is defined by the projection test below, not by the formulas: if a s
 
 ## Error handling
 
-- sfmData fails to load → exception, chunk fails.
+- sfmData fails to load → exception in `preprocess`; the node fails before any Blender chunk runs.
 - View without pose or intrinsic → skipped, logged.
 - Non-pinhole intrinsic (equidistant, equirectangular) → skipped, logged.
-- No landmarks and no mesh → exception with a clear message.
+- No landmarks and no mesh → exception in `preprocess` with a clear message.
 - Missing background/mask for a view when required → that view is skipped (2.0 behavior), logged by Blender.
-- Blender non-zero exit → chunk fails; Blender's stdout/stderr is in the chunk log.
+- Blender non-zero exit → chunk fails; Blender's stdout/stderr is in the chunk log (standard `CommandLineNode` behavior).
 
 ## Testing
 
