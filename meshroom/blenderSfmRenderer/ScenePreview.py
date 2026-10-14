@@ -1,24 +1,30 @@
-__version__ = "2.0"
+__version__ = "3.0"
 
 from meshroom.core import desc
 from pyalicevision import parallelization as avpar
 
+import logging
 import os.path
 
-currentDir = os.path.dirname(os.path.abspath(__file__))
+from .sfmExport import exportScene
+
 
 class ScenePreview(desc.CommandLineNode):
-    commandLine = "{blenderCmdValue} -b --python {scriptValue} -- {allParams}"
+    commandLine = ("{blenderCmdValue} -b --factory-startup --python-exit-code 1 "
+                   "--python {nodeSourceCodeFolder}/scripts/render.py -- "
+                   "--views {nodeCacheFolder}/cameras.json --landmarks {nodeCacheFolder}/landmarks.ply "
+                   "{allParams}")
     size = avpar.DynamicViewsSize("cameras")
     parallelization = desc.Parallelization(blockSize=40)
     commandLineRange = "--rangeStart {rangeStart} --rangeSize {rangeBlockSize}"
 
     category = "Utils"
     documentation = """
-This node uses Blender to visualize a 3D model from a given set of cameras.
-The cameras must be a SfMData file in JSON format.
-For the 3D model it supports both point clouds in Alembic format and meshes in OBJ format.
-One frame per viewpoint will be rendered, and the undistorted views can optionally be used as background.
+This node uses Blender to render a 3D model from every view of an SfMData.
+Each render matches the view's pinhole intrinsics (focal, principal point, pixel ratio) and its pose;
+lens distortion is ignored, so renders align with the undistorted images.
+If a mesh (.obj) is given it is rendered, otherwise the SfMData landmarks are rendered as a point cloud.
+The undistorted views can optionally be used as background.
 """
 
     inputs = [
@@ -31,24 +37,16 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
             commandLineGroup="",
         ),
         desc.File(
-            name="script",
-            label="Script",
-            description="Path to the internal script for rendering in Blender.",
-            value=os.path.join("{nodeSourceCodeFolder}", "scripts", "preview.py"),
-            invalidate=False,
-            commandLineGroup="",
-            advanced=True,
-        ),
-        desc.File(
             name="cameras",
-            label="Cameras",
-            description="SfMData with the views, poses and intrinsics to use (in JSON format).",
+            label="SfMData",
+            description="SfMData with the views, poses and intrinsics to use (any format readable by AliceVision).",
             value="",
+            commandLineGroup="",
         ),
         desc.File(
             name="model",
-            label="Model",
-            description="Point cloud (.abc) or mesh (.obj) to render.",
+            label="Mesh",
+            description="Optional mesh (.obj) to render. If empty, the SfMData landmarks are rendered.",
             value="",
         ),
         desc.BoolParam(
@@ -73,7 +71,7 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
         desc.File(
             name="masks",
             label="Masks",
-            description="Folder containing the masks.",
+            description="Folder containing the masks. If empty, the background image alpha is used.",
             value="",
             enabled=lambda node: node.useMasks.value,
         ),
@@ -81,8 +79,8 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
             name="pointCloudParams",
             label="Point Cloud Settings",
             commandLineGroup=None,
-            enabled=lambda node: node.model.value.lower().endswith(".abc"),
-            description="Settings for point cloud rendering.",
+            enabled=lambda node: not node.model.value.lower().endswith(".obj"),
+            description="Settings for landmarks rendering.",
             items=[
                 desc.FloatParam(
                     name="particleSize",
@@ -141,3 +139,17 @@ One frame per viewpoint will be rendered, and the undistorted views can optional
             commandLineGroup="",
         ),
     ]
+
+    def preprocess(self, node):
+        '''Export cameras (and landmarks when no mesh is given) once, before the Blender chunks.'''
+        model = node.model.value
+        useMesh = model.lower().endswith(".obj")
+        if model and not useMesh:
+            logging.warning(f"Model '{model}' is not an .obj mesh: rendering the SfMData landmarks instead.")
+
+        folder = node.internalFolder
+        exportScene(
+            node.cameras.value,
+            os.path.join(folder, "cameras.json"),
+            None if useMesh else os.path.join(folder, "landmarks.ply"),
+        )
