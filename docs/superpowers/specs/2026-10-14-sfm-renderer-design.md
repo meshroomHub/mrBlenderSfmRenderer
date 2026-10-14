@@ -13,7 +13,7 @@ Rendering style stays the old preview style, chosen by node parameters: mesh as 
 
 ## Constraints
 
-- pyalicevision **cannot** be imported inside Blender's Python (Blender links Python statically; the pyalicevision `.so` needs `libpython3.11.so`). Confirmed not working. AliceVision code and `bpy` code must live in separate processes.
+- pyalicevision **cannot** be imported inside Blender's Python. Verified with blender 4.5.3 and aliceVision 3.3.7: (1) Blender links Python statically, and pyalicevision needs `libpython3.11.so.1.0`; (2) with python-3.11.14's libpython added to `LD_LIBRARY_PATH`, the import then fails on `libaliceVision_image.so: undefined symbol OpenImageIO_v3_0::ustring::empty_std_string`, because Blender bundles its own, incompatible OpenImageIO. AliceVision code and `bpy` code must live in separate processes.
 - Packages come from rez. `package.py` already declares `MRBLENDERSFMRENDERER_SUBREQUIRES = blender-4:aliceVision`, so the node process has pyalicevision and `blender` on `PATH`. No change to `package.py`.
 - The node replaces `ScenePreview` (same class name), version bumped `2.0` → `3.0`.
 
