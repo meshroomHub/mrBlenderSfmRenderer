@@ -35,9 +35,9 @@ def blenderCmd():
 
 def runBlender(blenderCmd, script, args):
     '''Run a Python script in background Blender and fail with its output on error.'''
-    cmd = blenderCmd + ["-b", "--factory-startup", "--python-exit-code", "1",
-                        "--python", str(script), "--"] + [str(a) for a in args]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    blenderArgs = ["-b", "--factory-startup", "--python-exit-code", "1",
+                   "--python", str(script), "--"] + [str(a) for a in args]
+    proc = subprocess.run(blenderCmd + blenderArgs, capture_output=True, text=True)
     assert proc.returncode == 0, f"Blender failed ({proc.returncode}):\n{proc.stdout}\n{proc.stderr}"
     return proc
 
