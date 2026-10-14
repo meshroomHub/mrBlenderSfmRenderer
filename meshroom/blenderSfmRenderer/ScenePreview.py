@@ -10,10 +10,11 @@ from .sfmExport import exportScene
 
 
 class ScenePreview(desc.CommandLineNode):
-    commandLine = ("{blenderCmdValue} -b --factory-startup --python-exit-code 1 "
-                   "--python {nodeSourceCodeFolder}/scripts/render.py -- "
-                   "--views {nodeCacheFolder}/cameras.json --landmarks {nodeCacheFolder}/landmarks.ply "
-                   "{allParams}")
+    # Paths outside {allParams} are not quoted by Meshroom
+    commandLine = ('{blenderCmdValue} -b --factory-startup --python-exit-code 1 '
+                   '--python "{nodeSourceCodeFolder}/scripts/render.py" -- '
+                   '--views "{nodeCacheFolder}/cameras.json" --landmarks "{nodeCacheFolder}/landmarks.ply" '
+                   '{allParams}')
     size = avpar.DynamicViewsSize("cameras")
     parallelization = desc.Parallelization(blockSize=40)
     commandLineRange = "--rangeStart {rangeStart} --rangeSize {rangeBlockSize}"
@@ -142,6 +143,9 @@ The undistorted views can optionally be used as background.
 
     def preprocess(self, node):
         '''Export cameras (and landmarks when no mesh is given) once, before the Blender chunks.'''
+        if node.useBackground.value and not node.undistortedImages.value:
+            raise RuntimeError("'Display Background' is enabled but 'Undistorted Images' is empty.")
+
         model = node.model.value
         useMesh = model.lower().endswith(".obj")
         if model and not useMesh:
