@@ -35,8 +35,14 @@ def blenderCmd():
 
 def runBlender(blenderCmd, script, args):
     '''Run a Python script in background Blender and fail with its output on error.'''
-    cmd = blenderCmd + ["-b", "--factory-startup", "--python-exit-code", "1",
-                        "--python", str(script), "--"] + [str(a) for a in args]
+    blenderArgs = ["-b", "--factory-startup", "--python-exit-code", "1",
+                   "--python", str(script), "--"] + [str(a) for a in args]
+    if blenderCmd[:2] == ["rez", "env"] and "--" in blenderCmd:
+        # "rez env pkgs -- cmd" drops everything after a second "--": use "rez env pkgs -c 'cmd'"
+        sep = blenderCmd.index("--")
+        cmd = blenderCmd[:sep] + ["-c", shlex.join(blenderCmd[sep + 1:] + blenderArgs)]
+    else:
+        cmd = blenderCmd + blenderArgs
     proc = subprocess.run(cmd, capture_output=True, text=True)
     assert proc.returncode == 0, f"Blender failed ({proc.returncode}):\n{proc.stdout}\n{proc.stderr}"
     return proc
