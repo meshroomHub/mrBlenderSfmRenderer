@@ -1,4 +1,6 @@
 import json
+import struct
+import zlib
 
 import numpy as np
 
@@ -71,3 +73,39 @@ def test_renderMeshWireframe(tmp_path, blenderCmd):
                baseArgs(tmp_path, out) + ["--model", tmp_path / "tri.obj", "--shading", "wireframe",
                                           "--edgeColor", "Green"])
     assert jpegSize(out / "imgA_preview.jpg") == (320, 240)
+
+
+def writePng(path, width, height, rgb):
+    '''Write a solid-color 8-bit RGB PNG.'''
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
+    row = b"\x00" + bytes(rgb) * width
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+        f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)))
+        f.write(chunk(b"IDAT", zlib.compress(row * height)))
+        f.write(chunk(b"IEND", b""))
+
+
+def readPixels(path):
+    '''Read an 8-bit RGB image as a numpy array (height, width, 3).'''
+    from pyalicevision import image
+    img = image.Image_RGBColor()
+    image.readImage(str(path), img, image.ImageReadOptions(image.EImageColorSpace_NO_CONVERSION))
+    return np.asarray(img.getNumpyArray(), dtype=float)
+
+
+def test_renderBackgroundColorPreserved(tmp_path, blenderCmd):
+    '''The undistorted background must not be tone-mapped (Blender 4 defaults to AgX).'''
+    writeScene(tmp_path)
+    background = tmp_path / "undistorted"
+    background.mkdir()
+    writePng(background / "imgA.png", 320, 240, (0, 0, 200))
+    writePng(background / "imgB.png", 200, 300, (0, 0, 200))
+    out = tmp_path / "out"
+    out.mkdir()
+    args = baseArgs(tmp_path, out)
+    args[args.index("--useBackground") + 1] = "True"
+    runBlender(blenderCmd, SCRIPTS_DIR / "render.py", args + ["--undistortedImages", background])
+    corner = readPixels(out / "imgA_preview.jpg")[5, 5]
+    assert np.abs(corner - [0, 0, 200]).max() <= 8, corner

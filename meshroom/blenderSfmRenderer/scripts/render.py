@@ -97,6 +97,9 @@ def initScene():
     scene.cycles.samples = 1
     scene.cycles.use_adaptive_sampling = False
     scene.cycles.use_denoising = False
+    # Keep background images and colors unchanged (Blender 4 defaults to AgX tone mapping)
+    scene.view_settings.view_transform = 'Standard'
+    scene.view_settings.look = 'None'
 
 
 def initCompositing(useBackground, useMasks, useBackgroundAlpha=False):
