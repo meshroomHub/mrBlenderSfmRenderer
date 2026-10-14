@@ -5,7 +5,8 @@ Blender plugin for rendering 3D models from multiple camera viewpoints using Ali
 
 Renders a mesh (`.obj`), or the SfMData landmarks when no mesh is given, from every view of an SfMData.
 Each render matches the view's pinhole intrinsics and pose (lens distortion is ignored: renders align with
-undistorted images). Undistorted images can be used as background and masks can be applied.
+undistorted images). The SfMData views are expected to be undistorted; each render is composited
+over its view image, and masks can be applied.
 
 How it works: the node's `preprocess` exports `cameras.json` (and `landmarks.ply`) with pyalicevision, then each
 chunk runs `scripts/render.py` in Blender. pyalicevision cannot be imported inside Blender, hence the split.

@@ -6,10 +6,10 @@ Rewrite the `ScenePreview` Meshroom node so that it:
 
 - takes an sfmData file (any format pyalicevision reads: `.sfm`, `.json`, `.abc`) and an optional mesh (`.obj`);
 - renders, with Blender, the mesh — or the sfmData landmarks when no mesh is given — from the point of view of every reconstructed view;
-- matches each view's pinhole intrinsics (focal, principal point, resolution, pixel ratio) and extrinsics exactly; lens distortion is ignored, so renders align with AliceVision *undistorted* images;
+- matches each view's pinhole intrinsics (focal, principal point, resolution, pixel ratio) and extrinsics exactly; the input views are assumed undistorted, so lens distortion is ignored;
 - writes one image per view to the node cache folder, exposed as an output with `semantic="image"` so the 2D viewer can browse it.
 
-Rendering style stays the old preview style, chosen by node parameters: mesh as wireframe or line art, points as colored particles, optional undistorted image as background, optional masks.
+Rendering style stays the old preview style, chosen by node parameters: mesh as wireframe or line art, points as colored particles, always composited over the view image from the sfmData, optional masks.
 
 ## Constraints
 
@@ -63,8 +63,7 @@ Inputs (names kept from 2.0 where meaning is unchanged):
 | `blenderCmd` | File | Default `blender`, `invalidate=False`, `commandLineGroup=""` (not in `allParams`). |
 | `cameras` | File | sfmData, any pyalicevision-readable format. `commandLineGroup=""`: Blender reads `cameras.json`, not the sfmData. |
 | `model` | File | Optional `.obj` mesh. Empty → render sfmData landmarks. A `.abc` value (from 2.0 graphs) logs a warning and falls back to landmarks. |
-| `useBackground`, `undistortedImages` | Bool, File | Unchanged. |
-| `useMasks`, `masks` | Bool, File | Unchanged (empty `masks` → background alpha, as in 2.0). |
+| `useMasks`, `masks` | Bool, File | Unchanged (empty `masks` → view image alpha). |
 | `pointCloudParams` (`particleSize`, `particleColor`) | Group | Enabled when `model` does not end with `.obj`. |
 | `meshParams` (`shading`, `edgeColor`) | Group | Enabled when `model` ends with `.obj`. |
 
@@ -88,13 +87,13 @@ Outputs: unchanged from 2.0 — `output` = `{nodeCacheFolder}`, `frames` = `{nod
 
 ## Stage 2 — `render.py` (bpy, per chunk)
 
-Same scene setup as 2.0 (Cycles, 1 sample, no denoise, film transparent, compositing graph for background/mask).
+Same scene setup as 2.0 (Cycles, 1 sample, no denoise, film transparent, compositing graph putting the render over the view image, with optional mask).
 
 - **Mesh**: `bpy.ops.wm.obj_import(filepath, forward_axis='Y', up_axis='Z')` (file coordinates unchanged), then the y/z flip below. Wireframe or line-art shading as in 2.0.
 - **Landmarks**: `bpy.ops.wm.ply_import(..., forward_axis='Y', up_axis='Z')`, then the 2.0 geometry-nodes particle setup.
 - **World convention**: the scene is in sfmData world coordinates. Landmarks are exported from the sfmData unchanged. AliceVision meshes are saved with y and z negated (`Mesh::save`, `src/aliceVision/mesh/Mesh.cpp`), so the imported mesh object gets `matrix_world = diag(1, −1, −1, 1)`.
 - Range: slice `views[rangeStart : rangeStart + rangeSize]`, clamped to the list length (as 2.0); skip entries with `valid: false`.
-- Per view: apply `cameraMath` output, set background/mask image (same viewId/stem glob lookup as 2.0; skip the view if a required image is missing), render to `<output>/<imageStem>_preview.jpg`, free images. No rescale (see Camera math).
+- Per view: apply `cameraMath` output, load the view image from its sfmData path (`imagePath` in `cameras.json`) as background and the mask (viewId/stem glob lookup in the masks folder, as 2.0); skip the view if either is missing, render to `<output>/<imageStem>_preview.jpg`, free images. No rescale (see Camera math).
 
 ## Camera math (`cameraMath.py`)
 
@@ -114,7 +113,7 @@ Verified on 2026-10-14 in Blender 4.5.3 with `bpy_extras.object_utils.world_to_c
 - View without pose or intrinsic → skipped, logged.
 - Non-pinhole intrinsic (equidistant, equirectangular) → skipped, logged.
 - No landmarks and no mesh → exception in `preprocess` with a clear message.
-- Missing background/mask for a view when required → that view is skipped (2.0 behavior), logged by Blender.
+- Missing view image, or missing mask when masks are on → that view is skipped, logged by Blender.
 - Blender non-zero exit → chunk fails; Blender's stdout/stderr is in the chunk log (standard `CommandLineNode` behavior).
 
 ## Testing
@@ -125,7 +124,7 @@ Tests run in `rez env aliceVision python-3.11 pytest`; Blender is reached throug
 2. **`tests/test_sfmExport.py`** (pyalicevision): builds a synthetic `.sfm`, runs the export, and checks `cameras.json` (values, `valid: false` entries, sort order) and `landmarks.ply`.
 3. **`tests/test_blenderProjection.py`** (Blender): applies `render.setupCamera` in Blender, projects points with `world_to_camera_view`, and compares them with the AliceVision pinhole projection (tolerance 1e-2 px).
 4. **`tests/test_blenderRender.py`** (Blender): runs `render.py` end to end on a synthetic `cameras.json` + PLY, and checks one output image per valid view at `width × height`.
-5. **Smoke run** in Meshroom on a real dataset, checked by eye: landmarks overlay their features on the undistorted backgrounds, and the mesh silhouette matches.
+5. **Smoke run** in Meshroom on a real dataset, checked by eye: landmarks overlay their features on the view images, and the mesh silhouette matches.
 
 ## Out of scope
 

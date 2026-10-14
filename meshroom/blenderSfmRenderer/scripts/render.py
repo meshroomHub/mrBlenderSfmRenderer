@@ -31,14 +31,10 @@ def createParser():
                         help="Landmarks PLY, rendered when no mesh is given.")
     parser.add_argument("--model", metavar='FILE', **optionalFile,
                         help="Mesh (.obj) to render. Anything else renders the landmarks.")
-    parser.add_argument("--useBackground", type=strToBool, default=False,
-                        help="Display the undistorted image as background.")
-    parser.add_argument("--undistortedImages", metavar='DIR', **optionalFile,
-                        help="Folder containing undistorted images to use as background.")
     parser.add_argument("--useMasks", type=strToBool, default=False,
                         help="Apply mask to the rendered geometry.")
     parser.add_argument("--masks", metavar='DIR', **optionalFile,
-                        help="Folder containing masks. Empty with useMasks: use background image alpha.")
+                        help="Folder containing masks. Empty with useMasks: use the view image alpha.")
     parser.add_argument("--particleSize", type=float, default=0.01,
                         help="Scale of particles used to show the point cloud.")
     parser.add_argument("--particleColor", type=str, default='Red',
@@ -102,8 +98,8 @@ def initScene():
     scene.view_settings.look = 'None'
 
 
-def initCompositing(useBackground, useMasks, useBackgroundAlpha=False):
-    '''Initialize Blender compositing graph for adding background image and mask to render.'''
+def initCompositing(useMasks, useBackgroundAlpha=False):
+    '''Initialize Blender compositing graph putting the render over the view image, with an optional mask.'''
     scene = bpy.context.scene
     scene.render.film_transparent = True
     scene.use_nodes = True
@@ -115,27 +111,17 @@ def initCompositing(useBackground, useMasks, useBackgroundAlpha=False):
     nodeRender = tree.nodes['Render Layers']
     nodeComposite = tree.nodes['Composite']
     links = tree.links
-    if useBackground and useMasks:
-        links.new(nodeBackground.outputs['Image'], nodeAlphaOver.inputs[1])
+    links.new(nodeBackground.outputs['Image'], nodeAlphaOver.inputs[1])
+    if useMasks:
         links.new(nodeRender.outputs['Image'], nodeSetAlpha.inputs['Image'])
         if useBackgroundAlpha:
             links.new(nodeBackground.outputs['Alpha'], nodeSetAlpha.inputs['Alpha'])
         else:
             links.new(nodeMask.outputs['Image'], nodeSetAlpha.inputs['Alpha'])
         links.new(nodeSetAlpha.outputs['Image'], nodeAlphaOver.inputs[2])
-        links.new(nodeAlphaOver.outputs['Image'], nodeComposite.inputs['Image'])
-    elif useBackground:
-        links.new(nodeBackground.outputs['Image'], nodeAlphaOver.inputs[1])
+    else:
         links.new(nodeRender.outputs['Image'], nodeAlphaOver.inputs[2])
-        links.new(nodeAlphaOver.outputs['Image'], nodeComposite.inputs['Image'])
-    elif useMasks:
-        links.new(nodeRender.outputs['Image'], nodeSetAlpha.inputs['Image'])
-        if useBackgroundAlpha:
-            # No background to take alpha from: fall back to render alpha
-            links.new(nodeRender.outputs['Alpha'], nodeSetAlpha.inputs['Alpha'])
-        else:
-            links.new(nodeMask.outputs['Image'], nodeSetAlpha.inputs['Alpha'])
-        links.new(nodeSetAlpha.outputs['Image'], nodeComposite.inputs['Image'])
+    links.new(nodeAlphaOver.outputs['Image'], nodeComposite.inputs['Image'])
     return nodeBackground, nodeMask
 
 
@@ -148,10 +134,9 @@ def findImage(folder, view):
     return None
 
 
-def loadImageInNode(folder, view, node):
-    '''Load the view image found in folder into a compositing image node. Return the image or None.'''
-    path = findImage(folder, view)
-    if not path:
+def loadImageInNode(path, node):
+    '''Load an image into a compositing image node. Return the image or None if the file is missing.'''
+    if not path or not os.path.isfile(path):
         return None
     img = bpy.data.images.load(filepath=path)
     node.image = img
@@ -284,22 +269,18 @@ def main():
         return 1
     args = parser.parse_args(argv)
 
-    if args.useBackground and not args.undistortedImages:
-        print("Error: --undistortedImages is required with --useBackground True.")
-        return 1
-
     useMesh = args.model.lower().endswith('.obj')
     if not useMesh and not args.landmarks:
         print("Error: no .obj mesh and no --landmarks given: nothing to render.")
         return 1
 
-    # useMasks without a masks folder: use the background image alpha channel
+    # useMasks without a masks folder: use the view image alpha channel
     useBackgroundAlpha = args.useMasks and not args.masks
 
     print("Init scene")
     initScene()
     scene = bpy.context.scene
-    nodeBackground, nodeMask = initCompositing(args.useBackground, args.useMasks, useBackgroundAlpha)
+    nodeBackground, nodeMask = initCompositing(args.useMasks, useBackgroundAlpha)
 
     with open(args.views) as f:
         views = json.load(f)['views']
@@ -323,28 +304,24 @@ def main():
             continue
         print("Rendering view " + view['viewId'])
 
-        img = None
-        if args.useBackground:
-            img = loadImageInNode(args.undistortedImages, view, nodeBackground)
-            if not img:
-                print("No background image for view " + view['viewId'] + ", skipped")
-                continue
+        img = loadImageInNode(view['imagePath'], nodeBackground)
+        if not img:
+            print("Image not found for view " + view['viewId'] + ": " + view['imagePath'] + ", skipped")
+            continue
 
         mask = None
         if args.useMasks and not useBackgroundAlpha:
-            mask = loadImageInNode(args.masks, view, nodeMask)
+            mask = loadImageInNode(findImage(args.masks, view), nodeMask)
             if not mask:
                 print("No mask for view " + view['viewId'] + ", skipped")
-                if img:
-                    bpy.data.images.remove(img)
+                bpy.data.images.remove(img)
                 continue
 
         setupCamera(scene, scene.camera, view)
         scene.render.filepath = os.path.join(os.path.abspath(args.output), view['imageStem'] + '_preview.jpg')
         bpy.ops.render.render(write_still=True)
 
-        if img:
-            bpy.data.images.remove(img)
+        bpy.data.images.remove(img)
         if mask:
             bpy.data.images.remove(mask)
 
