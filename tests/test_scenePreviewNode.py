@@ -30,7 +30,7 @@ def test_nodeDescription(nodeModule):
     nodeDesc = nodeModule.ScenePreview()
     assert nodeModule.__version__ == "3.0"
     assert nodeDesc.hasPreprocess
-    assert "{nodeSourceCodeFolder}/scripts/render.py" in nodeDesc.commandLine
+    assert "{nodeSourceCodeFolder}/../../blender/render.py" in nodeDesc.commandLine
     assert '--views "{nodeCacheFolder}/cameras.json"' in nodeDesc.commandLine
     inputs = {a.name: a for a in nodeDesc.inputs}
     assert "script" not in inputs
@@ -66,6 +66,6 @@ def test_preprocessAbcModelFallsBackToLandmarks(tmp_path, nodeModule):
 def test_commandLineQuotesPaths(nodeModule):
     '''Cache and source folders may contain spaces: they are not quoted by Meshroom.'''
     cmd = nodeModule.ScenePreview().commandLine
-    assert '--python "{nodeSourceCodeFolder}/scripts/render.py"' in cmd
+    assert '--python "{nodeSourceCodeFolder}/../../blender/render.py"' in cmd
     assert '--views "{nodeCacheFolder}/cameras.json"' in cmd
     assert '--landmarks "{nodeCacheFolder}/landmarks.ply"' in cmd
