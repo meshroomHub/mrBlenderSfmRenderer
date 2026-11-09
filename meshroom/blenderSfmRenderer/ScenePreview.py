@@ -6,13 +6,11 @@ from pyalicevision import parallelization as avpar
 import logging
 import os.path
 
-from .sfmExport import exportScene
-
 
 class ScenePreview(desc.CommandLineNode):
     # Paths outside {allParams} are not quoted by Meshroom
     commandLine = ('{blenderCmdValue} -b --factory-startup --python-exit-code 1 '
-                   '--python "{nodeSourceCodeFolder}/scripts/render.py" -- '
+                   '--python "{nodeSourceCodeFolder}/../../blender/render.py" -- '
                    '--views "{nodeCacheFolder}/cameras.json" --landmarks "{nodeCacheFolder}/landmarks.ply" '
                    '{allParams}')
     size = avpar.DynamicViewsSize("cameras")
@@ -134,6 +132,9 @@ Each render is composited over its view image.
         useMesh = model.lower().endswith(".obj")
         if model and not useMesh:
             logging.warning(f"Model '{model}' is not an .obj mesh: rendering the SfMData landmarks instead.")
+
+        # Imported here: when Meshroom loads this folder flat, the package is not registered yet at module load.
+        from .sfmExport import exportScene
 
         folder = node.internalFolder
         exportScene(

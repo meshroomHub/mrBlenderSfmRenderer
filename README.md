@@ -9,7 +9,7 @@ undistorted images). The SfMData views are expected to be undistorted; each rend
 over its view image, and masks can be applied.
 
 How it works: the node's `preprocess` exports `cameras.json` (and `landmarks.ply`) with pyalicevision, then each
-chunk runs `scripts/render.py` in Blender. pyalicevision cannot be imported inside Blender, hence the split.
+chunk runs `blender/render.py` in Blender. pyalicevision cannot be imported inside Blender, hence the split.
 
 ## Tests
 

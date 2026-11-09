@@ -16,7 +16,7 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 NODE_DIR = REPO / "meshroom" / "blenderSfmRenderer"
-SCRIPTS_DIR = NODE_DIR / "scripts"
+SCRIPTS_DIR = REPO / "blender"
 
 # Import helper modules directly (the package name would clash with the real meshroom package).
 for path in (str(NODE_DIR), str(SCRIPTS_DIR)):
